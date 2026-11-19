@@ -1,0 +1,239 @@
+# Enterprise Multi-Branch Network Infrastructure
+
+A comprehensive enterprise network design and simulation built in **Cisco Packet Tracer**. This project implements a resilient Headquarters (HQ) core architecture connected to four remote branch offices and a simulated ISP edge, featuring Layer-2 redundancy, dynamic routing, centralized enterprise services, security hardening, NAT/PAT, and Site-to-Site IPsec VPN tunnels.
+
+---
+
+## Table of Contents
+1. [Network Architecture & IP Addressing](#network-architecture--ip-addressing)
+2. [Key Implemented Technologies](#key-implemented-technologies)
+3. [Feature Verification & Testing Guide](#feature-verification--testing-guide)
+   - [Layer 2 Switching & Redundancy](#1-layer-2-switching--redundancy)
+   - [Layer 3 Routing & Gateway Redundancy](#2-layer-3-routing--gateway-redundancy)
+   - [Enterprise Application Services](#3-enterprise-application-services)
+   - [Network & Port Security](#4-network--port-security)
+   - [WAN Edge, NAT/PAT & Site-to-Site IPsec VPN](#5-wan-edge-natpat--site-to-site-ipsec-vpn)
+4. [Recommended End-to-End Demo Workflow](#recommended-end-to-end-demo-workflow)
+
+---
+
+## Network Architecture & IP Addressing
+
+### HQ VLAN & HSRP Addressing Scheme
+The Headquarters LAN is segmented into isolated logical networks using VLANs, with **Core01** acting as the primary active HSRP gateway (priority `110`) and **Core02** acting as the standby gateway (priority `100`) with preemption enabled.
+
+| VLAN ID | Department / Role | Subnet | Core01 SVI | Core02 SVI | HSRP Virtual Gateway |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **VLAN 10** | Sales | `192.168.10.0/24` | `192.168.10.252` | `192.168.10.253` | `192.168.10.254` |
+| **VLAN 11** | HR | `192.168.11.0/24` | `192.168.11.252` | `192.168.11.253` | `192.168.11.254` |
+| **VLAN 12** | Accounts | `192.168.12.0/24` | `192.168.12.252` | `192.168.12.253` | `192.168.12.254` |
+| **VLAN 20** | Server Farm | `172.10.10.0/24` | `172.10.10.252` | `172.10.10.253` | `172.10.10.254` |
+
+### Centralized Servers (`VLAN 20`)
+| Service | IP Address | Default Gateway |
+| :--- | :--- | :--- |
+| **Web Server (HTTP)** (`www.company.com`) | `172.10.10.1` | `172.10.10.254` |
+| **DNS Server** | `172.10.10.2` | `172.10.10.254` |
+| **Email Server (SMTP / POP3)** | `172.10.10.3` | `172.10.10.254` |
+
+### WAN, Branch & Internet Edge Addressing
+| Link / Site | Local Interface / IP | Remote Peer / Subnet | Notes |
+| :--- | :--- | :--- | :--- |
+| **Core01 ↔ Central Router** | `10.1.1.1` | — | OSPF uplink |
+| **Core02 ↔ Central Router** | `10.2.2.2` | — | Redundant OSPF uplink |
+| **Branch 1 (`Serial1/0`)** | `5.1.1.1` | `5.1.1.2` (`192.168.13.0/24`) | OSPF + IPsec VPN Peer |
+| **Branch 2 (`Serial1/1`)** | `6.1.1.1` | `6.1.1.2` (`192.168.14.0/24`) | OSPF + IPsec VPN Peer |
+| **Branch 3 (`Serial1/2`)** | `7.1.1.1` | `7.1.1.2` (`192.168.15.0/24`) | OSPF + IPsec VPN Peer |
+| **Branch 4 (`Serial1/3`)** | `8.1.1.1` | `8.1.1.2` (`192.168.16.0/24`) | OSPF + IPsec VPN Peer |
+| **EDGE-RTR Inside (`Gi0/0`)** | `10.3.3.2` | Enterprise Core/Central | `ip nat inside` |
+| **EDGE-RTR Outside (`Gi0/1`)** | `200.1.1.1` | `200.1.1.2` (ISP Router) | `ip nat outside` (PAT Overload) |
+| **Simulated Internet Server** | — | `203.0.113.10` | External connectivity target |
+
+---
+
+## Key Implemented Technologies
+
+* **Switching & Layer-2 Redundancy:** VLAN segmentation, IEEE 802.1Q trunking, Per-VLAN Spanning Tree (PVST+), and LACP EtherChannel link aggregation.
+* **Routing & High Availability:** Inter-VLAN routing via Switch Virtual Interfaces (SVIs), Hot Standby Router Protocol (HSRP) with preemption, and multi-site OSPFv2 dynamic routing with default-route propagation.
+* **Enterprise Services:** Centralized DHCP with remote branch DHCP Relay (`ip helper-address`), internal DNS resolution, corporate HTTP web hosting, and SMTP/POP3 email services.
+* **Security & Access Control:** Extended ACLs for inter-departmental isolation, Switch Port Security with Sticky MAC learning (`shutdown` violation mode), and administrative shutdown of unused switch ports.
+* **WAN & Perimeter Security:** PAT (NAT Overload) for centralized Internet access across all HQ and branch subnets, plus Site-to-Site IPsec VPN tunnels securing traffic between HQ Sales and all four branches.
+
+---
+
+## Feature Verification & Testing Guide
+
+### 1. Layer 2 Switching & Redundancy
+
+* **VLAN Segmentation** (Run on `Core01`, `Core02`, or Access/Leaf Switches):
+  ```cisco
+  show vlan brief
+Expected Output: Displays VLAN 10 (SALES), VLAN 11 (HR), VLAN 12 (ACCOUNTS), and VLAN 20 (SERVER) in active status with assigned access ports.
+
+802.1Q Trunking (Run on Core01, Core02, leaf-01, or leafSw02):
+
+Cisco CLI
+show interfaces trunk
+Expected Output: Status: trunking, Encapsulation: 802.1q, and Vlans allowed: 10,11,12,20.
+
+Spanning Tree Protocol (PVST+) (Run on Core/Leaf Switches):
+
+Cisco CLI
+show spanning-tree
+show spanning-tree vlan 10
+Expected Output: Displays Root Bridge ID, local Bridge ID, and port roles (Root, Designated, and Alternate/Blocking on redundant paths to prevent Layer-2 loops).
+
+EtherChannel / LACP (Run on EtherChannel-paired Switches):
+
+Cisco CLI
+show etherchannel summary
+Expected Output: Po1(SU) indicating a Layer-2 Port-Channel in use, with physical member interfaces bundled as (P).
+
+2. Layer 3 Routing & Gateway Redundancy
+Inter-VLAN Routing (SVIs) (Run on Core01 and Core02):
+
+Cisco CLI
+show ip interface brief
+Expected Output: Vlan10, Vlan11, Vlan12, and Vlan20 show up/up with .252 addresses on Core01 and .253 addresses on Core02.
+
+HSRP Normal State & Live Failover Test:
+
+Check normal state on both core switches:
+
+Cisco CLI
+show standby brief
+Expected: Core01 shows Active (Priority 110) for VLANs 10, 11, 12, and 20; Core02 shows Standby (Priority 100).
+
+Simulate a failure on Core01:
+
+Cisco CLI
+configure terminal
+interface vlan 10
+shutdown
+end
+Verify failover on Core02 (show standby brief): Vl10 transitions to Active for virtual IP 192.168.10.254. From a Sales PC, ping 192.168.10.254 and ping 172.10.10.1 continue to succeed.
+
+Restore Core01:
+
+Cisco CLI
+configure terminal
+interface vlan 10
+no shutdown
+end
+Expected: Because preemption is enabled, Core01 automatically reclaims the Active role.
+
+OSPF Dynamic Routing & Redundant Core Uplinks (Run on Central Router):
+
+Cisco CLI
+show ip ospf neighbor
+show ip route ospf
+Expected Output: Full (FULL) adjacencies with Core01 (10.1.1.1), Core02 (10.2.2.2), and all four branch routers (5.1.1.2, 6.1.1.2, 7.1.1.2, 8.1.1.2), dynamically learning branch subnets 192.168.13.0/24 through 192.168.16.0/24 (O routes).
+
+3. Enterprise Application Services
+DHCP & Branch DHCP Relay:
+
+HQ Client PC (ipconfig): Automatically receives IP 192.168.10.x, Subnet Mask 255.255.255.0, Default Gateway 192.168.10.254, and DNS Server 172.10.10.2.
+
+Branch Router (show running-config): Interfaces contain ip helper-address to forward remote DHCP broadcasts to the centralized DHCP server.
+
+DNS & HTTP Web Service:
+
+From an authorized PC Command Prompt, run ping www.company.com (resolves to 172.10.10.1).
+
+Open the Web Browser and navigate to http://www.company.com to load the corporate web page.
+
+Corporate Email (SMTP / POP3):
+
+Using the desktop Email client, send a message from a Sales user to an HR user via 172.10.10.3 and click Receive on the HR PC to verify delivery.
+
+4. Network & Port Security
+Extended ACL (Department Isolation):
+
+From a Sales PC, ping <HR-PC-IP> FAILS (blocked by policy), while ping 172.10.10.1 (Web Server) PASSES.
+
+Verify ACL hit counters on the Core Layer-3 switch:
+
+Cisco CLI
+show access-lists
+Switch Port Security & Sticky MAC:
+
+Check the authorized access port on the Access Switch:
+
+Cisco CLI
+show port-security interface fa0/x
+show port-security address
+Expected: Port Status: Secure-up, Maximum MAC Addresses: 1, Violation Mode: Shutdown.
+
+Live Violation Test: Disconnect the authorized PC, connect an unauthorized PC to fa0/x, and generate traffic. Re-running show port-security interface fa0/x shows Secure-shutdown and Violation Count: 1.
+
+Recovery: Reconnect the authorized PC and bounce the port:
+
+Cisco CLI
+configure terminal
+interface fa0/x
+shutdown
+no shutdown
+end
+Unused Port Hardening (Run on Access Switches):
+
+Cisco CLI
+show interfaces status
+Expected Output: All unused physical switch ports are administratively disabled.
+
+5. WAN Edge, NAT/PAT & Site-to-Site IPsec VPN
+Internet Edge & Default Routing:
+
+On EDGE-RTR, show ip interface brief confirms Gi0/0 (10.3.3.2) and Gi0/1 (200.1.1.1) are up/up, and show ip route 0.0.0.0 routes unknown Internet traffic to 200.1.1.2.
+
+On Branch-1 Router, show ip route 0.0.0.0 confirms branches learn an external OSPF default route (O*E2) via Serial1/0 to exit through HQ.
+
+PAT (NAT Overload) Verification (Run on EDGE-RTR):
+
+Cisco CLI
+show running-config | include ip nat
+show access-lists 1
+Live PAT Test: Ping the Internet Server (203.0.113.10) simultaneously from a Sales PC (192.168.10.x), a Branch PC (192.168.13.x), and the DNS Server (172.10.10.2), then inspect the translation table:
+
+Cisco CLI
+show ip nat translations
+show ip nat statistics
+Expected Output: Multiple distinct Inside Local addresses translate to the single Inside Global IP 200.1.1.1.
+
+Site-to-Site IPsec VPN (HQ Sales ↔ Branches 1–4):
+
+Phase 1 (IKE SA) Check on Central Router:
+
+Cisco CLI
+show crypto isakmp sa
+Expected Output: All four branch peers (5.1.1.2, 6.1.1.2, 7.1.1.2, 8.1.1.2) report QM_IDLE and ACTIVE.
+
+Phase 2 (IPsec Encryption) Live Proof:
+
+On Central Router, run show crypto ipsec sa and note #pkts encaps / #pkts encrypt and #pkts decaps / #pkts decrypt for 192.168.10.0/24 ↔ 192.168.13.0/24.
+
+From the Sales PC, ping all four branch subnets (192.168.13.21, 192.168.14.x, 192.168.15.x, 192.168.16.x).
+
+Re-run show crypto ipsec sa on Central Router to verify Status: ACTIVE and confirm the encryption/decryption packet counters have incremented.
+
+Recommended End-to-End Demo Workflow
+If presenting or grading this topology live, follow this sequence to validate every layer cleanly:
+
+Switching: show vlan brief, show interfaces trunk, show spanning-tree, show etherchannel summary
+
+DHCP: ipconfig on a Client PC
+
+DNS & Web: ping www.company.com and browse http://www.company.com
+
+Email: Send an email from Sales to HR and retrieve it on the HR PC
+
+ACL Isolation: Verify Sales → HR fails while Sales → Web Server succeeds (show access-lists)
+
+Port Security: Verify Secure-up and Sticky MAC on the access port (show port-security interface fa0/x)
+
+OSPF Routing: Verify full adjacencies and learned branch routes (show ip ospf neighbor, show ip route ospf)
+
+HSRP Failover: Shut down interface vlan 10 on Core01, verify Core02 takes over as Active, then restore Core01
+
+NAT/PAT: Ping 203.0.113.10 from HQ and Branch PCs, then check show ip nat translations on EDGE-RTR
+
+IPsec VPN: Verify QM_IDLE ACTIVE (show crypto isakmp sa), ping Branch 1 from Sales, and confirm rising encryption counters (show crypto ipsec sa)
