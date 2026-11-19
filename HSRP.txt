@@ -1,0 +1,691 @@
+HSRP Backup Gateway - Live Demonstration Guide
+Purpose
+HSRP was implemented to provide backup/default-gateway redundancy.
+
+In the current design:
+
+Core01 = Main / Active Core
+
+Core02 = Backup / Standby Core
+
+The PCs do not use the real IP address of Core01 or Core02 as their default gateway.
+
+Instead, the PCs use a common HSRP Virtual Gateway.
+
+For the Sales VLAN:
+
+Core01 Real IP: 192.168.10.252
+
+Core02 Real IP: 192.168.10.253
+
+HSRP Virtual Gateway: 192.168.10.254
+
+Sales PC Default Gateway: 192.168.10.254
+
+The main idea is:
+
+Normal condition:
+
+Sales PC | | Default Gateway = 192.168.10.254 | HSRP Virtual Gateway | Core01 = ACTIVE Core02 = STANDBY
+
+If Core01 fails:
+
+Sales PC | | Same Default Gateway = 192.168.10.254 | HSRP Virtual Gateway | Core02 = ACTIVE
+
+Therefore, the client does not need to change its default gateway during a Core01 failure.
+
+Step 1 - Show Normal HSRP Status
+First, open Core01 CLI and run:
+
+show standby brief
+Expected output:
+
+Interface Grp Pri P State  Active Standby         Virtual IP
+Vl10      10  110 P Active local  192.168.10.253 192.168.10.254
+Vl11      11  110 P Active local  192.168.11.253 192.168.11.254
+Vl12      12  110 P Active local  192.168.12.253 192.168.12.254
+Vl20      20  110 P Active local  172.10.10.253  172.10.10.254
+Explain to the examiner:
+
+"Sir, Core01 is currently the Active HSRP device. Core01 has HSRP priority 110."
+
+Now open Core02 and run:
+
+show standby brief
+Expected output:
+
+Vl10 10 100 P Standby 192.168.10.252 local 192.168.10.254
+Vl11 11 100 P Standby 192.168.11.252 local 192.168.11.254
+Vl12 12 100 P Standby 192.168.12.252 local 192.168.12.254
+Vl20 20 100 P Standby 172.10.10.252  local 172.10.10.254
+Explain:
+
+"Sir, Core02 is currently the Standby or backup core. Core02 has priority 100."
+
+Step 2 - Explain Active and Standby
+ACTIVE means:
+
+The device is currently performing the HSRP virtual gateway function.
+
+STANDBY means:
+
+The device is waiting as a backup and is prepared to take over if the Active device becomes unavailable.
+
+Normal condition:
+
+Core01 = ACTIVE
+
+Core02 = STANDBY
+
+Failure condition:
+
+Core01 = DOWN
+
+Core02 = ACTIVE
+
+Step 3 - Show the Virtual Gateway
+Open a Sales PC.
+
+Go to:
+
+Desktop → IP Configuration
+
+Show the Default Gateway:
+
+192.168.10.254
+
+Explain:
+
+"Sir, the Sales PC is not using Core01's real IP 192.168.10.252 or Core02's real IP 192.168.10.253. The Sales PC uses the HSRP Virtual Gateway 192.168.10.254."
+
+Therefore:
+
+Core01 = 192.168.10.252
+
+Core02 = 192.168.10.253
+
+Virtual Gateway = 192.168.10.254
+
+Step 4 - Show Normal Connectivity Before Failure
+From the Sales PC Command Prompt:
+
+ping 192.168.10.254
+Expected:
+
+Reply from 192.168.10.254
+Reply from 192.168.10.254
+Reply from 192.168.10.254
+Reply from 192.168.10.254
+
+Packets: Sent = 4, Received = 4, Lost = 0
+Explain:
+
+"Sir, the Sales PC can currently reach the HSRP Virtual Gateway."
+
+Now test the Web Server:
+
+ping 172.10.10.1
+Expected:
+
+Reply from 172.10.10.1
+Reply from 172.10.10.1
+Reply from 172.10.10.1
+Reply from 172.10.10.1
+
+0% packet loss
+Now test a remote branch:
+
+ping 192.168.13.254
+Expected:
+
+Reply from 192.168.13.254
+Reply from 192.168.13.254
+Reply from 192.168.13.254
+Reply from 192.168.13.254
+
+0% packet loss
+Explain:
+
+"Sir, in the normal condition the Sales PC can reach its virtual gateway, centralized server and remote branch."
+
+Step 5 - Show OSPF Backup Connectivity
+Before failing Core01, open the Central Router.
+
+Run:
+
+show ip ospf neighbor
+The Central Router should show OSPF adjacency with both Core01 and Core02.
+
+Core01 is connected through:
+
+10.1.1.0/24
+
+Core02 is connected through:
+
+10.2.2.0/24
+
+Explain:
+
+"Sir, both Core01 and Core02 also have routed OSPF connectivity toward the Central Router. Therefore Core02 is not only a backup gateway; Core02 also has an upstream routed path."
+
+The routing table can also be shown:
+
+show ip route ospf
+The Central Router can have routes toward central VLAN networks through both:
+
+10.1.1.1
+
+and:
+
+10.2.2.2
+
+Core02 also learns the remote branch routes.
+
+For example:
+
+192.168.13.0/24
+
+192.168.14.0/24
+
+192.168.15.0/24
+
+192.168.16.0/24
+
+Step 6 - Simulate Active Gateway Failure
+Tell the examiner:
+
+"Sir, now I will simulate a failure of the Active gateway for the Sales VLAN."
+
+On Core01:
+
+enable
+configure terminal
+
+interface vlan 10
+
+shutdown
+
+end
+Do not shut down the entire switch for this controlled demonstration.
+
+Only VLAN10 is intentionally disabled.
+
+Step 7 - Show Core02 Automatically Taking Over
+Wait a few seconds.
+
+Now open Core02 and run:
+
+show standby brief
+Expected/observed failover output:
+
+Vl10 10 100 P Active local unknown 192.168.10.254
+Before failure:
+
+Core01 = ACTIVE
+
+Core02 = STANDBY
+
+After failure:
+
+Core01 VLAN10 = DOWN
+
+Core02 = ACTIVE
+
+Most importantly:
+
+The Virtual Gateway is still:
+
+192.168.10.254
+
+Explain:
+
+"Sir, Core01's Sales gateway interface is unavailable. Core02 automatically changed from Standby to Active. However, the client's virtual gateway is still 192.168.10.254."
+
+Step 8 - Prove the Client Did Not Need Any Configuration Change
+Go back to the Sales PC.
+
+The Sales PC Default Gateway is still:
+
+192.168.10.254
+
+No IP configuration was changed on the Sales PC.
+
+Explain:
+
+"Sir, I did not modify the client configuration. The Sales PC still uses the same virtual gateway."
+
+Step 9 - Prove Connectivity Still Works During Core01 Failure
+Keep Core01 VLAN10 shutdown.
+
+From the Sales PC:
+
+ping 192.168.10.254
+Expected:
+
+PASS
+
+Then test the centralized Web Server:
+
+ping 172.10.10.1
+Expected:
+
+PASS
+
+Then test Branch1:
+
+ping 192.168.13.254
+Expected:
+
+PASS
+
+Explain:
+
+"Sir, although the preferred Active gateway is unavailable, the Sales PC can still reach the same virtual gateway, centralized servers and remote branch through Core02."
+
+The traffic path is now:
+
+Sales PC
+
+→ HSRP Virtual Gateway 192.168.10.254
+
+→ Core02
+
+→ Core02 upstream 10.2.2.2
+
+→ Central Router 10.2.2.1
+
+→ OSPF
+
+→ Remote Branch
+
+Step 10 - Explain HSRP and OSPF Together
+HSRP and OSPF perform different functions.
+
+HSRP:
+
+Provides gateway redundancy.
+
+OSPF:
+
+Provides routed network/path information.
+
+Easy way to remember:
+
+HSRP = Gateway Backup
+
+OSPF = Route/Path Backup
+
+During normal operation:
+
+Sales PC
+
+→ HSRP Virtual Gateway
+
+→ Core01
+
+→ OSPF
+
+→ Central Router
+
+→ Branch
+
+During Core01 VLAN10 failure:
+
+Sales PC
+
+→ Same HSRP Virtual Gateway
+
+→ Core02
+
+→ Core02 OSPF uplink
+
+→ Central Router
+
+→ Branch
+
+Step 11 - Restore Core01
+Tell the examiner:
+
+"Sir, now I will restore the preferred Core01 gateway."
+
+On Core01:
+
+configure terminal
+
+interface vlan 10
+
+no shutdown
+
+end
+Wait a few seconds.
+
+Step 12 - Show Core01 Becoming Active Again
+On Core01:
+
+show standby brief
+Expected:
+
+Vl10 10 110 P Active local 192.168.10.253 192.168.10.254
+Core01 is Active again.
+
+On Core02:
+
+show standby brief
+Expected:
+
+Vl10 10 100 P Standby 192.168.10.252 local 192.168.10.254
+Core02 has returned to Standby.
+
+Explain:
+
+"Sir, Core01 has priority 110 and Core02 has priority 100. Preemption is enabled, so when Core01 recovers, the higher-priority Core01 automatically reclaims the Active role."
+
+Step 13 - Why Priority Was Configured
+Core01:
+
+Priority = 110
+
+Core02:
+
+Priority = 100
+
+Therefore:
+
+Core01 is the preferred Active device.
+
+Configuration on Core01:
+
+standby 10 priority 110
+Configuration on Core02:
+
+standby 10 priority 100
+Higher priority means Core01 is preferred.
+
+Step 14 - Why Preempt Was Configured
+Both cores use:
+
+standby 10 preempt
+Preempt allows the higher-priority Core01 to become Active again after Core01 returns from a failure.
+
+Easy explanation:
+
+Core01 is the main gateway.
+
+Core02 is the backup gateway.
+
+If Core01 fails:
+
+Core02 becomes Active.
+
+If Core01 later returns:
+
+Core01 becomes Active again because Core01 has the higher priority and preemption is enabled.
+
+Step 15 - Full Demonstration Sequence
+The examiner demonstration can be performed in this exact order:
+
+Core01:
+
+show standby brief
+
+Show:
+
+Core01 = ACTIVE
+
+Core02:
+
+show standby brief
+
+Show:
+
+Core02 = STANDBY
+
+Sales PC:
+Show:
+
+Default Gateway = 192.168.10.254
+
+Sales PC:
+
+ping 192.168.10.254
+
+Expected:
+
+PASS
+
+Sales PC:
+
+ping 172.10.10.1
+
+Expected:
+
+PASS
+
+Sales PC:
+
+ping 192.168.13.254
+
+Expected:
+
+PASS
+
+Central Router:
+
+show ip ospf neighbor
+
+Show:
+
+Core01 OSPF neighbor = FULL
+
+Core02 OSPF neighbor = FULL
+
+Core01:
+
+configure terminal interface vlan 10 shutdown end
+
+Core02:
+
+show standby brief
+
+Show:
+
+Core02 VLAN10 = ACTIVE
+
+Sales PC:
+
+ping 192.168.10.254
+
+Expected:
+
+PASS
+
+Sales PC:
+
+ping 172.10.10.1
+
+Expected:
+
+PASS
+
+Sales PC:
+
+ping 192.168.13.254
+
+Expected:
+
+PASS
+
+Core01:
+
+configure terminal interface vlan 10 no shutdown end
+
+Core01:
+
+show standby brief
+
+Show:
+
+Core01 = ACTIVE again
+
+Core02:
+
+show standby brief
+
+Show:
+
+Core02 = STANDBY again
+
+Step 16 - What This Demonstration Proves
+The demonstration proves:
+
+Core01 is normally Active.
+Core02 is normally Standby.
+Clients use an HSRP Virtual Gateway.
+The virtual gateway remains unchanged during failure.
+Core02 automatically takes over when Core01 becomes unavailable.
+Client configuration does not need to change.
+Centralized server connectivity continues through Core02.
+Remote branch connectivity continues through the Core02 OSPF path.
+Core01 automatically becomes Active again after recovery because of higher priority and preemption.
+Step 17 - Easy Explanation for the Examiner
+If the examiner asks:
+
+"What is your backup?"
+
+Answer:
+
+"Sir, Core02 is my backup or Standby multilayer core switch."
+
+If the examiner asks:
+
+"How can you prove Core02 is the backup?"
+
+Answer:
+
+"First I can show Core01 as Active and Core02 as Standby using show standby brief. Then I can shut down the Core01 VLAN10 gateway interface. Core02 automatically changes from Standby to Active while the client continues using the same 192.168.10.254 virtual gateway. I can then ping the central server and remote branch from the Sales PC to prove that connectivity continues through the backup core."
+
+Step 18 - If the Examiner Asks Why HSRP Was Used
+Answer:
+
+"Sir, before HSRP, Core01 was the only default gateway and represented a single point of failure. HSRP allows Core01 and Core02 to provide one common virtual gateway. If Core01 becomes unavailable, Core02 automatically takes over without requiring changes on the client devices."
+
+Step 19 - If the Examiner Asks HSRP vs OSPF
+Answer:
+
+"HSRP provides first-hop or default-gateway redundancy for end devices. OSPF provides dynamic Layer-3 routing between networks and sites."
+
+Easy:
+
+HSRP = Gateway redundancy
+
+OSPF = Route/path redundancy
+
+Step 20 - Important IP Addresses to Remember
+For Sales VLAN:
+
+Core01:
+
+192.168.10.252
+
+Core02:
+
+192.168.10.253
+
+HSRP Virtual Gateway:
+
+192.168.10.254
+
+For HR VLAN:
+
+Core01:
+
+192.168.11.252
+
+Core02:
+
+192.168.11.253
+
+HSRP Virtual Gateway:
+
+192.168.11.254
+
+For Accounts VLAN:
+
+Core01:
+
+192.168.12.252
+
+Core02:
+
+192.168.12.253
+
+HSRP Virtual Gateway:
+
+192.168.12.254
+
+For Server VLAN:
+
+Core01:
+
+172.10.10.252
+
+Core02:
+
+172.10.10.253
+
+HSRP Virtual Gateway:
+
+172.10.10.254
+
+Step 21 - Upstream Redundancy
+Core01 to Central Router:
+
+Network:
+
+10.1.1.0/24
+
+Core01:
+
+10.1.1.1
+
+Central Router:
+
+10.1.1.2
+
+Core02 to Central Router:
+
+Network:
+
+10.2.2.0/24
+
+Core02:
+
+10.2.2.2
+
+Central Router:
+
+10.2.2.1
+
+Both paths participate in OSPF.
+
+Step 22 - Most Important Verification Commands
+HSRP status:
+
+show standby brief
+OSPF neighbors:
+
+show ip ospf neighbor
+OSPF routes:
+
+show ip route ospf
+Interface status:
+
+show ip interface brief
+VLAN information:
+
+show vlan brief
+Trunk information:
+
+show interfaces trunk
+Step 23 - Final Short Viva Statement
+"Sir, Core01 is my primary Active gateway and Core02 is my Standby backup gateway. All clients use an HSRP virtual IP as their default gateway. If Core01 fails, Core02 automatically becomes Active while keeping the same virtual gateway. Core02 also has a separate OSPF uplink to the Central Router, so remote branch connectivity can continue through the backup core. When Core01 recovers, its higher HSRP priority and preemption allow it to become Active again."
