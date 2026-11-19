@@ -1,0 +1,64 @@
+## Site-to-Site IPsec VPN (HQ to Remote Branches)
+
+Site-to-Site IPsec VPN tunnels are configured between the **HQ Central Router** and **four remote branch routers** to protect inter-site traffic with encryption and integrity verification rather than relying solely on Layer-3 routing.
+
+### VPN Topology & Peer Mapping
+
+```text
+HQ Sales (192.168.10.0/24)
+       |
+ Central Router
+       |
+       +---- IPsec (5.1.1.1 ↔ 5.1.1.2) ----> Branch-1 (192.168.13.0/24)
+       |
+       +---- IPsec (6.1.1.1 ↔ 6.1.1.2) ----> Branch-2 (192.168.14.0/24)
+       |
+       +---- IPsec (7.1.1.1 ↔ 7.1.1.2) ----> Branch-3 (192.168.15.0/24)
+       |
+       +---- IPsec (8.1.1.1 ↔ 8.1.1.2) ----> Branch-4 (192.168.16.0/24)
+
+
+ Tunnel,Local Peer (HQ),Remote Peer (Branch),Local Protected Subnet,Remote Protected Subnet
+Branch-1 VPN,5.1.1.1,5.1.1.2,192.168.10.0/24 (Sales),192.168.13.0/24
+Branch-2 VPN,6.1.1.1,6.1.1.2,192.168.10.0/24 (Sales),192.168.14.0/24
+Branch-3 VPN,7.1.1.1,7.1.1.2,192.168.10.0/24 (Sales),192.168.15.0/24
+Branch-4 VPN,8.1.1.1,8.1.1.2,192.168.10.0/24 (Sales),192.168.16.0/24
+
+Verification & Live Proof Procedure
+1. Verify IKE Phase 1 / Security Associations (QM_IDLE ACTIVE)
+On the HQ Central Router, run:
+
+Cisco CLI
+
+
+show crypto isakmp sa
+Expected Output: All four remote branch peers (5.1.1.2, 6.1.1.2, 7.1.1.2, 8.1.1.2) appear with state QM_IDLE and status ACTIVE, confirming that IKE/IPsec security associations are established.
+
+
+
+
+2. Inspect Protected Subnets, Transform Set & Packet Counters
+On the HQ Central Router, run:
+
+Cisco CLI
+show crypto ipsec sa
+Protected Networks (local ident / remote ident): Confirms 192.168.10.0/255.255.255.0 protected against 192.168.13.0/255.255.255.0 (and .14.0, .15.0, .16.0 across the other tunnel sections) for the corresponding current_peer.
+
+Encryption & Mode: Look for transform: esp-aes esp-sha-hmac, in use settings = {Tunnel, }, and Status: ACTIVE (ESP with AES encryption and SHA-HMAC integrity in Tunnel mode).
+
+Baseline Counters: Note the initial #pkts encaps / #pkts encrypt and #pkts decaps / #pkts decrypt values (for example, encrypt: 18, decrypt: 16).
+
+3. Live Traffic Encryption Test
+Record baseline counters on the HQ Central Router using show crypto ipsec sa.
+
+Generate traffic from the Sales PC (192.168.10.21) to the Branch-1 PC (192.168.13.21):
+
+Plaintext
+ping 192.168.13.21
+Re-check counters immediately on the HQ Central Router:
+
+Cisco CLI
+show crypto ipsec sa
+Expected Result: Both encrypt and decrypt counters increase (for example, from 18/16 to 22/20), proving packets are actively being encapsulated/encrypted outbound and decapsulated/decrypted inbound through the IPsec tunnel.
+
+Verify all four branches: Ping reachable hosts in Branch-2 (192.168.14.x), Branch-3 (192.168.15.x), and Branch-4 (192.168.16.x) from the Sales PC, then confirm all four tunnels show QM_IDLE ACTIVE (show crypto isakmp sa), Status: ACTIVE, and non-zero/increasing encrypt and decrypt counters (show crypto ipsec sa).
